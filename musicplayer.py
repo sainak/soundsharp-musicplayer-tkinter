@@ -1,94 +1,138 @@
-import pygame
-from tkinter import Listbox
-from tkinter import PhotoImage
 import os
-from tkinter.filedialog import *
-from PIL import Image
+from tkinter import Button, Listbox, PhotoImage, Tk
+from tkinter.filedialog import askdirectory
+from pathlib import Path
 
-par = 1
-playlist = []
-
-root = Tk()
-root.title("soundsharp")
-root.state("iconic")
-
-#commands assigned to buttons
-def select_dir():
-    directory = askdirectory()
-    os.chdir(directory)
-    for files in os.listdir(directory):
-        if files.endswith("mp3"):
-            playlist.append(files)
-
-    for t in playlist:
-        listbox.insert(0, t)
-        
-def play(): 
-    global par
-    par += 1
-    if (par%2 ==1):
-        bt1.config(image=ps)
-        bt1.image = ps
-    else:
-        bt1.config(image=pl)
-        bt1.image = pl
-
-    b = listbox.curselection()[0]
-    global i
-    i = len(playlist) - b - 1
-    pygame.mixer.pre_init(44100,-16,2, 1024)
-    pygame.mixer.init()
-    pygame.mixer.music.load(playlist[i])
-    pygame.mixer.music.play()
-def nxt():
-    global i 
-    i -= 1
-    pygame.mixer.pre_init(44100,-16,2, 1024)
-    pygame.mixer.init()
-    pygame.mixer.music.load(playlist[i])
-    pygame.mixer.music.play()
-def prev():
-    global i 
-    i += 1
-    pygame.mixer.pre_init(44100,-16,2, 1024)
-    pygame.mixer.init()
-    pygame.mixer.music.load(playlist[i])
-    pygame.mixer.music.play()
-def pause():
-    pygame.mixer.music.pause()
-def stop():
-    pygame.mixer.music.stop()
-
-#symbols to be displayed on button
-playImage = PhotoImage(file = "./play.png")
-nextImage = PhotoImage(file = "./next.png")
-prevImage = PhotoImage(file = "./priv.png")
-listImage = PhotoImage(file = "./list.png")
-exitImage = PhotoImage(file = "./exit.png")
-pauseImage = PhotoImage(file = "./pause.png")
-
-pl = playImage.subsample(3, 3)
-ps = pauseImage.subsample(3, 3)
-nx = nextImage.subsample(3,3);prv = prevImage.subsample(3,3)
-lst = listImage.subsample(3, 3);pwr = exitImage.subsample(3,3)
-
-#gui structure
-bt1 = Button(root, text="play", command=play, image=pl)
-bt1.config(height=40, width=40)
-bt2 = Button(root, text="prev", image=prv, command=prev)
-bt2.config( height=40, width=40)
-bt3 = Button(root, text="next", image=nx, command=nxt)
-bt3.config(height=40, width=40)
-bt4 = Button(root, text="list", command=select_dir, image=lst)
-bt4.config(height=40, width=40)
-bt5 = Button(root, text="exit", image=pwr, command=root.destroy)
-bt5.config(height=40, width=40)
-bt1.grid(column=0, row=0, padx=2, pady=2);bt2.grid(column=1, row=0, padx=2, pady=2)
-bt3.grid(column=2, row=0, padx=2, pady=2);bt4.grid(column=3, row=0, padx=2, pady=2)
-bt5.grid(column=4, row=0, padx=2, pady=2)
-listbox = Listbox(root, relief='sunken', width=30, height=20)
-listbox.grid(row=1, columnspan=8)
-
-root.mainloop()
+from pygame import mixer
 
 
+class Player(Tk):
+    def __init__(self) -> None:
+        mixer.pre_init(44100, -16, 2, 1024)
+        mixer.init()
+        self.playlist = []
+        self.playing = False
+        self.now_playing = -1
+        self.directory = ""
+
+        # box
+        super().__init__()
+        self.title("soundsharp")
+        self.state("iconic")
+
+        # symbols to be displayed on button
+        assets = Path(__file__).resolve().parent / "assets"
+        self.play_image = PhotoImage(file=assets / "play.png").subsample(3)
+        self.pause_image = PhotoImage(file=assets / "pause.png").subsample(3)
+        self.next_image = PhotoImage(file=assets / "next.png").subsample(3)
+        self.prev_image = PhotoImage(file=assets / "priv.png").subsample(3)
+        self.list_image = PhotoImage(file=assets / "list.png").subsample(3)
+        self.exit_image = PhotoImage(file=assets / "exit.png").subsample(3)
+
+        # gui structure
+        self.playback_button = self.__create_button(
+            "play", self.play_image, self.toggle_playback
+        )
+        self.prev_button = self.__create_button("prev", self.prev_image, self.prev)
+        self.next_button = self.__create_button("next", self.next_image, self.next)
+        self.list_button = self.__create_button(
+            "list", self.list_image, self.select_dir
+        )
+        self.exit_button = self.__create_button("exit", self.exit_image, self.destroy)
+        self.listbox = Listbox(self, relief="sunken", width=32, height=20)
+
+        self.playback_button.grid(column=0, row=0)
+        self.prev_button.grid(column=1, row=0, padx=2, pady=2)
+        self.next_button.grid(column=2, row=0, padx=2, pady=2)
+        self.list_button.grid(column=3, row=0, padx=2, pady=2)
+        self.exit_button.grid(column=4, row=0, padx=2, pady=2)
+        self.listbox.grid(row=1, columnspan=8)
+
+    def __create_button(self, text, image, command):
+        return Button(
+            self,
+            text=text,
+            image=image,
+            command=command,
+            height=40,
+            width=40,
+            padx=2,
+            pady=2,
+        )
+
+    def __select_track_from_list(self, index):
+        length = len(self.playlist)
+        self.listbox.selection_clear(0, length)
+        self.listbox.selection_set(index)
+
+    def select_dir(self):
+        directory = askdirectory()
+        if isinstance(directory, tuple):
+            # no selection
+            return
+        path = Path(directory).resolve()
+        self.pause()
+        self.now_playing = -1
+        self.listbox.delete(0, len(self.playlist))
+        self.playlist = []
+        i = 0
+        for file in path.iterdir():
+            if file.is_file() and file.suffix == ".mp3":
+                self.playlist.append(file)
+                self.listbox.insert(i, file.stem)
+                i += 1
+
+    def set_track(self):
+        mixer.music.unload()
+        self.__select_track_from_list(self.now_playing)
+        mixer.music.load(self.playlist[self.now_playing])
+        mixer.music.play()
+
+    def pause(self):
+        mixer.music.pause()
+        self.playback_button.config(image=self.play_image)
+        self.playing = False
+
+    def play(self):
+        try:
+            current_selection = self.listbox.curselection()[0]
+        except IndexError:
+            if not self.playlist:
+                return
+            current_selection = 0
+            self.__select_track_from_list(current_selection)
+        if self.now_playing == current_selection:
+            mixer.music.unpause()
+        else:
+            self.now_playing = current_selection
+            self.set_track()
+        self.playback_button.config(image=self.pause_image)
+        self.playing = True
+
+    def toggle_playback(self):
+        if self.playing:
+            self.pause()
+        else:
+            self.play()
+
+    def prev(self):
+        if self.now_playing > 0:
+            self.now_playing -= 1
+        self.set_track()
+
+    def next(self):
+        if self.now_playing < len(self.playlist) - 1:
+            self.now_playing += 1
+        self.set_track()
+
+    def stop():
+        mixer.music.stop()
+
+
+def main():
+    player = Player()
+    player.mainloop()
+
+
+if __name__ == "__main__":
+    main()
